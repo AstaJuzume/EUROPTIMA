@@ -22,7 +22,7 @@ months.forEach(function(m,i){pairs.forEach(function(x){seed.alloc.push({person:x
 var db;try{db=JSON.parse(localStorage.getItem(KEY))||JSON.parse(JSON.stringify(seed))}catch(e){db=JSON.parse(JSON.stringify(seed))}
 if(!Array.isArray(db.actuals))db.actuals=[];
 if(!db.actuals.length){db.revenues.filter(function(r){return r.kind==='Actual'}).forEach(function(r){db.actuals.push({project:r.project,month:r.month,revenue:r.amount,staff:0,sub:0,expense:0})})}
-db.projects.forEach(function(p){if(!p.portfolio)p.portfolio=p.portfolio||'Warsaw'});
+db.projects.forEach(function(p){if(!p.portfolio)p.portfolio=p.region||'Warsaw'});
 var state={tab:'overview',month:'2026-11',company:'All',portfolio:'All',role:'Admin',modal:null,edit:null};
 var tabs=[['overview','Overview'],['projects','Projects'],['allocation','Staff allocation'],['revenue','Revenue plan'],['actuals','Plan vs actual'],['subcontractors','Subcontractors'],['expenses','Expenses'],['employees','Employees'],['reports','Financial reports'],['settings','Settings']];
 function save(){localStorage.setItem(KEY,JSON.stringify(db))}
