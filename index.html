@@ -78,8 +78,21 @@ months.forEach(function(m,i){pairs.forEach(function(x){seed.alloc.push({person:x
 [['p1','Subcontractor',16500,'2026-09','Architectural partner'],['p2','Subcontractor',22000,'2026-10','Design services'],['p4','Subcontractor',5100,'2026-11','Engineering support'],['p3','Subcontractor',12400,'2027-01','Technical advisor'],['p1','Expense',1650,'2026-09','Travel'],['p2','Expense',1900,'2026-10','Travel']].forEach(function(x,i){seed.costs.push({id:'c'+i,project:x[0],type:x[1],amount:x[2],month:x[3],label:x[4]})});
 var db;try{db=JSON.parse(localStorage.getItem(KEY))||JSON.parse(JSON.stringify(seed))}catch(e){db=JSON.parse(JSON.stringify(seed))}
 if(!Array.isArray(db.actuals))db.actuals=[];
-if(!db.actuals.length){db.revenues.filter(function(r){return r.kind==='Actual'}).forEach(function(r){db.actuals.push({project:r.project,month:r.month,revenue:r.amount,staff:0,sub:0,expense:0})})}
-db.projects.forEach(function(p){if(!p.portfolio)p.portfolio=p.region||'Warsaw'});
+if(!db.actuals.length){db.revenues.filter(function(r){return r.kind==='Actual'}).forEach(function(r){db.actuals.push({project:r.project,month:r.month,revenue:r.amount,staff:0,sub:0,expense:0,reportedFields:['revenue']})})}
+db.projects.forEach(function(p,i){
+ if(!p.portfolio)p.portfolio=p.region||'Warsaw';
+ if(!p.start)p.start='2026-07';
+ if(!p.end)p.end=['2027-08','2027-12','2027-03','2027-10','2027-06','2027-12'][i%6];
+});
+if(!Array.isArray(db.portfolios))db.portfolios=[...new Set(db.projects.map(function(p){return p.portfolio}))];
+if(!db.fxRates){db.fxRates={};months.forEach(function(m){db.fxRates[m]=Number(db.rate)||4.3})}
+if(!db.submissions)db.submissions={};
+db.actuals.forEach(function(a){
+ if(!a.reportedFields){
+   a.reportedFields=['revenue'];
+   ['staff','sub','expense'].forEach(function(k){if(Number(a[k]||0)!==0)a.reportedFields.push(k)});
+ }
+});
 // Keep project directors and allocated staff as distinct concepts in demo records.
 var samplePositions=['Structural Engineer','Cost Consultant','Project Coordinator','Design Engineer','Technical Specialist','Site Consultant'];
 db.people.forEach(function(e){var ix=/^Manager 0([1-6])$/.exec(e.name);if(ix)e.name='Employee 0'+ix[1];if(!e.position)e.position=samplePositions[Number(e.id.slice(1))-1]||'Specialist'});
@@ -88,7 +101,15 @@ var tabs=[['overview','Overview'],['projects','Projects'],['allocation','Staff a
 function save(){localStorage.setItem(KEY,JSON.stringify(db))}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function num(n){return Number(n||0).toLocaleString('en-GB',{maximumFractionDigits:0})}
-function eur(n,c){return Number(n||0)/(c==='PLN'?Number(db.rate)||4.3:1)}
+function fxRate(m){return Number(db.fxRates[m]||db.rate||4.3)}
+function eur(n,c,m){return Number(n||0)/(c==='PLN'?fxRate(m):1)}
+function currencyFromEur(n,c,m){return Number(n||0)*(c==='PLN'?fxRate(m):1)}
+function money(n){return n===null||n===undefined?'—':cash(n)}
+function monthInProject(p,m){return m>=(p.start||'2026-07')&&m<=(p.end||'2027-12')}
+function projectMonths(p){return months.filter(function(m){return monthInProject(p,m)})}
+function submitKey(p,m){return p+':'+m}
+function statusFor(p,m){return db.submissions[submitKey(p,m)]||'Draft'}
+function setDraft(p,m){db.submissions[submitKey(p,m)]='Draft'}
 function cash(n){return '€ '+num(n)}
 function label(m){return new Date(m+'-01T12:00:00').toLocaleDateString('en-GB',{month:'short',year:'2-digit'})}
 function proj(id){return db.projects.find(function(p){return p.id===id})}
@@ -96,15 +117,42 @@ function employee(id){return db.people.find(function(p){return p.id===id})}
 function admin(){return state.role==='Admin'}
 function editable(){return state.role!=='Executive'}
 function visible(){return db.projects.filter(function(p){return(state.company==='All'||p.company===state.company)&&(state.portfolio==='All'||p.portfolio===state.portfolio)&&(state.role!=='Project director'||p.manager==='Manager 01')})}
-function portfolioList(){return ['All'].concat([...new Set(db.projects.map(function(p){return p.portfolio||'Warsaw'}))].sort())}
-function actualEntry(p,m){return db.actuals.find(function(a){return a.project===p&&a.month===m})||{revenue:0,staff:0,sub:0,expense:0}}
-function actualCalc(p,m){var a=actualEntry(p.id,m);var z={revenue:eur(a.revenue,p.currency),staff:eur(a.staff,p.currency),sub:eur(a.sub,p.currency),expense:eur(a.expense,p.currency)};z.cost=z.staff+z.sub+z.expense;z.profit=z.revenue-z.cost;return z}
-function actualTotals(ps,m){var z={revenue:0,staff:0,sub:0,expense:0,cost:0,profit:0};ps.forEach(function(p){var a=actualCalc(p,m);Object.keys(z).forEach(function(k){z[k]+=a[k]})});return z}
+function portfolioList(){return ['All'].concat(db.portfolios.slice().sort())}
+function actualEntry(p,m){return db.actuals.find(function(a){return a.project===p&&a.month===m})||null}
+function actualMetric(p,m,k){var a=actualEntry(p,m);return a&&Array.isArray(a.reportedFields)&&a.reportedFields.indexOf(k)>=0?Number(a[k]||0):null}
+function actualCalc(p,m){
+ var v={revenue:actualMetric(p.id,m,'revenue'),staff:actualMetric(p.id,m,'staff'),sub:actualMetric(p.id,m,'sub'),expense:actualMetric(p.id,m,'expense')};
+ ['revenue','staff','sub','expense'].forEach(function(k){if(v[k]!==null)v[k]=eur(v[k],p.currency,m)});
+ v.cost=['staff','sub','expense'].every(function(k){return v[k]!==null})?v.staff+v.sub+v.expense:null;
+ v.profit=v.revenue!==null&&v.cost!==null?v.revenue-v.cost:null;
+ return v
+}
+function actualTotals(ps,m){
+ var z={revenue:null,staff:null,sub:null,expense:null,cost:null,profit:null,revenueCount:0,profitCount:0};
+ ['revenue','staff','sub','expense','cost','profit'].forEach(function(k){
+ var values=ps.map(function(p){return actualCalc(p,m)[k]}).filter(function(v){return v!==null});
+ z[k]=values.length?values.reduce(function(a,b){return a+b},0):null
+ });
+ z.revenueCount=ps.filter(function(p){return actualMetric(p.id,m,'revenue')!==null}).length;
+ z.profitCount=ps.filter(function(p){return actualCalc(p,m).profit!==null}).length;
+ return z
+}
+function expectedTotals(p,asOf){
+ var actual={revenue:0,staff:0,sub:0,expense:0,cost:0,profit:0},remaining={revenue:0,staff:0,sub:0,expense:0,cost:0,profit:0},reported=0,missingEarlier=0;
+ projectMonths(p).forEach(function(m){
+ var full=actualCalc(p,m),useActual=m<=asOf&&full.profit!==null,z=useActual?actual:remaining,v=useActual?full:calc(p,m);
+ if(useActual)reported++;else if(m<=asOf)missingEarlier++;
+ Object.keys(actual).forEach(function(k){z[k]+=v[k]})
+ });
+ var total={};Object.keys(actual).forEach(function(k){total[k]=actual[k]+remaining[k]});
+ return {actual:actual,remaining:remaining,total:total,reported:reported,missingEarlier:missingEarlier}
+}
 function allocation(e,p,m){var a=db.alloc.find(function(x){return x.person===e&&x.project===p&&x.month===m});return a?Number(a.pct):0}
-function calc(p,m){var revenue=db.revenues.filter(function(x){return x.project===p.id&&x.month===m}).reduce(function(s,x){return s+eur(x.amount,p.currency)},0);
-var staff=db.people.reduce(function(s,e){return s+Number(e.cost)*allocation(e.id,p.id,m)/100},0);
-var sub=0,expense=0;db.costs.forEach(function(x){if(x.project===p.id&&x.month===m){if(x.type==='Subcontractor')sub+=eur(x.amount,p.currency);else expense+=eur(x.amount,p.currency)}});
-return{revenue:revenue,staff:staff,sub:sub,expense:expense,cost:staff+sub+expense,profit:revenue-staff-sub-expense}};
+function calc(p,m){var revenue=db.revenues.filter(function(x){return x.project===p.id&&x.month===m}).reduce(function(sum,x){return sum+eur(x.amount,p.currency,m)},0);
+var staff=db.people.reduce(function(sum,e){return sum+Number(e.cost)*allocation(e.id,p.id,m)/100},0);
+var sub=0,expense=0;db.costs.forEach(function(x){if(x.project===p.id&&x.month===m){if(x.type==='Subcontractor')sub+=eur(x.amount,p.currency,m);else expense+=eur(x.amount,p.currency,m)}});
+return{revenue:revenue,staff:staff,sub:sub,expense:expense,cost:staff+sub+expense,profit:revenue-staff-sub-expense}
+}
 function totals(list,m){var z={revenue:0,staff:0,sub:0,expense:0,cost:0,profit:0};list.forEach(function(p){var f=calc(p,m);Object.keys(z).forEach(function(k){z[k]+=f[k]})});return z}
 function select(id,values,current){return '<select id="'+id+'">'+values.map(function(v){return '<option value="'+esc(v)+'" '+(v===current?'selected':'')+'>'+esc(v)+'</option>'}).join('')+'</select>'}
 function projectOptions(){return db.projects.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>'}).join('')}
